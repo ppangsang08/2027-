@@ -1,24 +1,29 @@
 using System.Collections;
 using System.Collections.Generic;
-using System.Reflection;
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.Rendering;
+using UnityEngine.SceneManagement;
+using TMPro;
 
 public class MazeProjectMaster : MonoBehaviour
 {
     // Maze settings
-    public int width = 15;
-    public int height = 15;
+    public int width = 75;
+    public int height = 75;
     public float cellSize = 1f;
 
     // inspector controls
     public bool useSeed = false;
     public int seed = 12345;
-    public bool useFixedStartEnd = false;
+    public bool useFixedStartEnd = true;
     public Vector2Int fixedStart = new Vector2Int(1, 1);
-    public Vector2Int fixedEnd = new Vector2Int(13, 13);
+    public Vector2Int fixedEnd = new Vector2Int(73, 73);
     public bool useTMP = true;
+    public int sessionDurationSeconds = 300;
+    public string resultSceneName = "Finish";
+    public bool disableOldCameraOnResult = true;
+    public float resultSceneFadeTime = 0.5f;
     public bool enableShadows = false;
     public Material wallMaterial;
     public Material floorMaterial;
@@ -44,9 +49,14 @@ public class MazeProjectMaster : MonoBehaviour
 
     // UI
     Canvas canvas;
-    Text resultText;
-    object resultTextTMPObj;
-    PropertyInfo tmpTextProp;
+    TMP_Text resultText;
+    TMP_Text timerText;
+
+    // session state
+    bool sessionActive = false;
+    bool isFinished = false;
+    float sessionTimeRemaining = 0f;
+    float timeUsed = 0f;
 
     // visualization
     LineRenderer userLine, bfsLine, dfsLine;
@@ -63,6 +73,17 @@ public class MazeProjectMaster : MonoBehaviour
         if (height < 5) height = 5;
         if (width % 2 == 0) width++;
         if (height % 2 == 0) height++;
+
+        if (useFixedStartEnd)
+        {
+            fixedStart = new Vector2Int(1, 1);
+            fixedEnd = new Vector2Int(width - 2, height - 2);
+        }
+
+        sessionActive = true;
+        isFinished = false;
+        sessionTimeRemaining = sessionDurationSeconds;
+        timeUsed = 0f;
 
         // create parents
         mazeRoot = new GameObject("MazeRoot").transform;
@@ -84,6 +105,7 @@ public class MazeProjectMaster : MonoBehaviour
 
         // create UI
         CreateUI();
+        SetTimerText(sessionTimeRemaining);
     }
 
     void GenerateMaze()
@@ -131,23 +153,13 @@ public class MazeProjectMaster : MonoBehaviour
         System.Random rng2 = useSeed ? new System.Random(seed + 1) : new System.Random();
         if (pathCells.Count >= 2)
         {
-            // choose start/end, or use fixed positions if requested
-            if (useFixedStartEnd)
-            {
-                startPos = fixedStart; endPos = fixedEnd;
-                if (startPos.x < 0 || startPos.x >= gw || startPos.y < 0 || startPos.y >= gh || !isPath[startPos.x, startPos.y]) startPos = pathCells[rng2.Next(pathCells.Count)];
-                if (endPos.x < 0 || endPos.x >= gw || endPos.y < 0 || endPos.y >= gh || !isPath[endPos.x, endPos.y]) endPos = pathCells[rng2.Next(pathCells.Count)];
-            }
-            else
-            {
-                startPos = pathCells[rng2.Next(pathCells.Count)];
-                Vector2Int cand; int attempts = 0;
-                do
-                {
-                    cand = pathCells[rng2.Next(pathCells.Count)]; attempts++;
-                } while ((Mathf.Abs(cand.x - startPos.x) + Mathf.Abs(cand.y - startPos.y) < (gw + gh) / 4) && attempts < 300);
-                endPos = cand;
-            }
+            startPos = fixedStart;
+            endPos = fixedEnd;
+            if (!IsWithinGrid(startPos, gw, gh)) startPos = new Vector2Int(1, 1);
+            if (!IsWithinGrid(endPos, gw, gh)) endPos = new Vector2Int(gw - 2, gh - 2);
+            isPath[startPos.x, startPos.y] = true;
+            isPath[endPos.x, endPos.y] = true;
+            CarveConnectionToEnd(endPos, gw, gh);
         }
         else
         {
@@ -155,6 +167,43 @@ public class MazeProjectMaster : MonoBehaviour
             endPos = new Vector2Int(gw - 2, gh - 2);
             if (!isPath[endPos.x, endPos.y]) isPath[endPos.x, endPos.y] = true;
         }
+    }
+
+    bool IsWithinGrid(Vector2Int g, int gw, int gh)
+    {
+        return g.x >= 0 && g.x < gw && g.y >= 0 && g.y < gh;
+    }
+
+    void CarveConnectionToEnd(Vector2Int endCandidate, int gw, int gh)
+    {
+        if (IsWithinGrid(endCandidate, gw, gh)) isPath[endCandidate.x, endCandidate.y] = true;
+        Vector2Int current = endCandidate;
+        Vector2Int[] dirs = new Vector2Int[] { new Vector2Int(1, 0), new Vector2Int(-1, 0), new Vector2Int(0, 1), new Vector2Int(0, -1) };
+        for (int radius = 1; radius < Mathf.Max(gw, gh); radius++)
+        {
+            foreach (var d in dirs)
+            {
+                Vector2Int probe = current + d * radius;
+                if (IsWithinGrid(probe, gw, gh) && isPath[probe.x, probe.y])
+                {
+                    Vector2Int step = current;
+                    while (step != probe)
+                    {
+                        int stepX = probe.x > step.x ? 1 : (probe.x < step.x ? -1 : 0);
+                        int stepY = probe.y > step.y ? 1 : (probe.y < step.y ? -1 : 0);
+                        step += new Vector2Int(stepX, stepY);
+                        isPath[step.x, step.y] = true;
+                    }
+                    return;
+                }
+            }
+        }
+    }
+
+    bool HasPathBetween(Vector2Int a, Vector2Int b)
+    {
+        // rough check using manhattan adjacency to avoid forced reconstruction if already likely connected.
+        return Mathf.Abs(a.x - b.x) + Mathf.Abs(a.y - b.y) < Mathf.Max(width, height);
     }
 
     void BuildVisuals()
@@ -272,7 +321,21 @@ public class MazeProjectMaster : MonoBehaviour
 
     void Update()
     {
+        if (!sessionActive || isFinished) return;
+        UpdateSessionTimer();
         HandleMovementInput();
+    }
+
+    void UpdateSessionTimer()
+    {
+        sessionTimeRemaining -= Time.deltaTime;
+        timeUsed = sessionDurationSeconds - sessionTimeRemaining;
+        SetTimerText(sessionTimeRemaining);
+        if (sessionTimeRemaining <= 0f)
+        {
+            sessionTimeRemaining = 0f;
+            FinishSession(false);
+        }
     }
 
     void HandleMovementInput()
@@ -306,19 +369,7 @@ public class MazeProjectMaster : MonoBehaviour
 
     void OnReachedEnd()
     {
-        // compute BFS and DFS paths
-        List<Vector2Int> bfs = GetBFSPath(startPos, endPos);
-        List<Vector2Int> dfs = GetDFSPath(startPos, endPos);
-        float pctBFS = (bfs == null) ? 0f : ComputeLcsPercentage(userPath, bfs);
-        float pctDFS = (dfs == null) ? 0f : ComputeLcsPercentage(userPath, dfs);
-        string txt = $"유저 vs DFS: {pctDFS:F1}%  /  유저 vs BFS: {pctBFS:F1}%";
-        SetResultText(txt);
-
-        // draw/animate paths
-        ClearLines();
-        StartDrawLine(ref userLine, userPath, Color.yellow);
-        StartDrawLine(ref dfsLine, dfs, Color.red);
-        StartDrawLine(ref bfsLine, bfs, Color.cyan);
+        FinishSession(true);
     }
 
     void ClearLines()
@@ -448,52 +499,122 @@ public class MazeProjectMaster : MonoBehaviour
         cgo.AddComponent<CanvasScaler>();
         cgo.AddComponent<GraphicRaycaster>();
 
-        GameObject textGO = new GameObject("ResultText"); textGO.transform.parent = cgo.transform;
-        // Try TextMeshPro if available
-        resultText = null; resultTextTMPObj = null; tmpTextProp = null;
-        if (useTMP)
-        {
-            var tmpType = System.Type.GetType("TMPro.TextMeshProUGUI, Unity.TextMeshPro");
-            if (tmpType != null)
-            {
-                var comp = textGO.AddComponent(tmpType);
-                resultTextTMPObj = comp;
-                tmpTextProp = tmpType.GetProperty("text");
-                tmpTextProp.SetValue(resultTextTMPObj, "Move with WASD or arrow keys");
-                var rect = textGO.GetComponent<RectTransform>(); rect.anchorMin = new Vector2(0.1f, 0.9f); rect.anchorMax = new Vector2(0.9f, 1f); rect.offsetMin = Vector2.zero; rect.offsetMax = Vector2.zero;
-            }
-        }
-        if (resultTextTMPObj == null)
-        {
-            resultText = textGO.AddComponent<Text>();
-            resultText.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
-            resultText.fontSize = 24; resultText.alignment = TextAnchor.UpperCenter;
-            RectTransform rt = resultText.GetComponent<RectTransform>(); rt.anchorMin = new Vector2(0.1f, 0.9f); rt.anchorMax = new Vector2(0.9f, 1f);
-            rt.offsetMin = Vector2.zero; rt.offsetMax = Vector2.zero; resultText.text = "Move with WASD or arrow keys";
-        }
+        // Timer text
+        GameObject timerGO = new GameObject("TimerText");
+        timerGO.transform.parent = cgo.transform;
+        timerText = timerGO.AddComponent<TextMeshProUGUI>();
+        timerText.fontSize = 24;
+        timerText.alignment = TextAlignmentOptions.Center;
+        timerText.color = Color.white;
+        RectTransform trt = timerText.GetComponent<RectTransform>();
+        trt.anchorMin = new Vector2(0.1f, 0.95f);
+        trt.anchorMax = new Vector2(0.9f, 1f);
+        trt.offsetMin = Vector2.zero;
+        trt.offsetMax = Vector2.zero;
+        timerText.text = "시간: 5:00";
+
+        // Result text
+        GameObject textGO = new GameObject("ResultText");
+        textGO.transform.parent = cgo.transform;
+        resultText = textGO.AddComponent<TextMeshProUGUI>();
+        resultText.fontSize = 24;
+        resultText.alignment = TextAlignmentOptions.Center;
+        resultText.color = Color.white;
+        RectTransform rrt = resultText.GetComponent<RectTransform>();
+        rrt.anchorMin = new Vector2(0.1f, 0.85f);
+        rrt.anchorMax = new Vector2(0.9f, 0.95f);
+        rrt.offsetMin = Vector2.zero;
+        rrt.offsetMax = Vector2.zero;
+        resultText.text = "Move with WASD or arrow keys";
     }
 
     void SetResultText(string txt)
     {
-        if (resultText != null) resultText.text = txt;
-        else if (resultTextTMPObj != null && tmpTextProp != null) tmpTextProp.SetValue(resultTextTMPObj, txt);
-        else Debug.Log(txt);
+        if (resultText != null)
+        {
+            resultText.text = txt;
+        }
+        else
+        {
+            Debug.Log(txt);
+        }
     }
 
-    void DrawLine(ref LineRenderer lr, List<Vector2Int> path, Color color)
+    void SetTimerText(float seconds)
     {
-        if (path == null || path.Count == 0) return;
-        if (lr == null)
+        int minutes = Mathf.FloorToInt(seconds / 60f);
+        int secs = Mathf.FloorToInt(seconds % 60f);
+        string text = $"남은 시간: {minutes:D2}:{secs:D2}";
+        if (timerText != null)
         {
-            GameObject go = new GameObject("Line"); go.transform.parent = mazeRoot;
-            lr = go.AddComponent<LineRenderer>();
-            lr.material = new Material(Shader.Find("Sprites/Default"));
-            lr.widthMultiplier = cellSize * 0.15f;
-            lr.positionCount = 0;
-            lr.numCapVertices = 4;
+            timerText.text = text;
         }
-        lr.startColor = lr.endColor = color;
-        lr.positionCount = path.Count;
-        for (int i = 0; i < path.Count; i++) lr.SetPosition(i, GridToWorld(path[i]) + Vector3.up * (0.1f * cellSize));
+    }
+
+    void FinishSession(bool reachedGoal)
+    {
+        if (isFinished) return;
+        isFinished = true;
+        sessionActive = false;
+        if (disableOldCameraOnResult && Camera.main != null) Camera.main.gameObject.SetActive(false);
+
+        List<Vector2Int> bfs = GetBFSPath(startPos, endPos);
+        List<Vector2Int> dfs = GetDFSPath(startPos, endPos);
+        float pctBFS = (bfs == null) ? 0f : ComputeLcsPercentage(userPath, bfs);
+        float pctDFS = (dfs == null) ? 0f : ComputeLcsPercentage(userPath, dfs);
+        float usedSec = sessionDurationSeconds - sessionTimeRemaining;
+        string summary = reachedGoal ? "탈출 성공!" : "시간 종료";
+        string score = $"{summary}\n유저 vs DFS: {pctDFS:F1}%\n유저 vs BFS: {pctBFS:F1}%\n걸음 수: {userPath.Count}\n목표까지 이동 시간: {usedSec:F1}초";
+        StartCoroutine(TransitionToResultScene(score, reachedGoal, bfs, dfs));
+    }
+
+    IEnumerator TransitionToResultScene(string scoreText, bool reachedGoal, List<Vector2Int> bfs, List<Vector2Int> dfs)
+    {
+        yield return new WaitForSeconds(resultSceneFadeTime);
+        var currentScene = SceneManager.GetActiveScene();
+        var resultScene = SceneManager.GetSceneByName(resultSceneName);
+        if (!resultScene.IsValid()) resultScene = SceneManager.CreateScene(resultSceneName);
+        SceneManager.MoveGameObjectToScene(this.gameObject, resultScene);
+        SceneManager.SetActiveScene(resultScene);
+        if (mazeRoot != null) Destroy(mazeRoot.gameObject);
+        if (canvas != null) Destroy(canvas.gameObject);
+
+        CreateResultSceneUI(scoreText, reachedGoal, bfs, dfs);
+        if (currentScene.IsValid() && currentScene.name != resultSceneName)
+        {
+            SceneManager.UnloadSceneAsync(currentScene);
+        }
+    }
+
+    void CreateResultSceneUI(string scoreText, bool reachedGoal, List<Vector2Int> bfs, List<Vector2Int> dfs)
+    {
+        GameObject resultRoot = new GameObject("ResultRoot");
+        resultRoot.transform.parent = this.transform;
+        GameObject cgo = new GameObject("ResultCanvas");
+        cgo.transform.parent = resultRoot.transform;
+        var resultCanvas = cgo.AddComponent<Canvas>();
+        resultCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
+        cgo.AddComponent<CanvasScaler>();
+        cgo.AddComponent<GraphicRaycaster>();
+
+        GameObject titleGO = new GameObject("TitleText"); titleGO.transform.parent = cgo.transform;
+        TMP_Text titleText = titleGO.AddComponent<TextMeshProUGUI>();
+        titleText.fontSize = 32; titleText.alignment = TextAlignmentOptions.Center; titleText.color = Color.white;
+        RectTransform trt = titleText.GetComponent<RectTransform>(); trt.anchorMin = new Vector2(0.1f, 0.8f); trt.anchorMax = new Vector2(0.9f, 0.95f); trt.offsetMin = Vector2.zero; trt.offsetMax = Vector2.zero;
+        titleText.text = reachedGoal ? "CLEAR!" : "TIME UP";
+
+        GameObject scoreGO = new GameObject("ScoreText"); scoreGO.transform.parent = cgo.transform;
+        TMP_Text scoreDisplay = scoreGO.AddComponent<TextMeshProUGUI>();
+        scoreDisplay.fontSize = 24; scoreDisplay.alignment = TextAlignmentOptions.Center; scoreDisplay.color = Color.yellow;
+        RectTransform srt = scoreDisplay.GetComponent<RectTransform>(); srt.anchorMin = new Vector2(0.1f, 0.45f); srt.anchorMax = new Vector2(0.9f, 0.8f); srt.offsetMin = Vector2.zero; srt.offsetMax = Vector2.zero;
+        scoreDisplay.text = scoreText;
+
+        GameObject lineSummary = new GameObject("PathSummary"); lineSummary.transform.parent = cgo.transform;
+        TMP_Text summaryText = lineSummary.AddComponent<TextMeshProUGUI>();
+        summaryText.fontSize = 20; summaryText.alignment = TextAlignmentOptions.Center; summaryText.color = Color.cyan;
+        RectTransform lrt = summaryText.GetComponent<RectTransform>(); lrt.anchorMin = new Vector2(0.1f, 0.2f); lrt.anchorMax = new Vector2(0.9f, 0.45f); lrt.offsetMin = Vector2.zero; lrt.offsetMax = Vector2.zero;
+        summaryText.text = "경로 비교 결과와 답안"
+            + "\nDFS 길이: " + (dfs != null ? dfs.Count.ToString() : "없음")
+            + "\nBFS 길이: " + (bfs != null ? bfs.Count.ToString() : "없음");
     }
 }
