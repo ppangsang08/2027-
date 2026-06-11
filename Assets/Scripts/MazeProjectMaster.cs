@@ -11,11 +11,12 @@ using TMPro;
 [RequireComponent(typeof(MazeUIController))]
 public class MazeProjectMaster : MonoBehaviour
 {
-    public int width = 45;
-    public int height = 45;
+    public int width = 151;
+    public int height = 151;
     public float cellSize = 1f;
     public bool useSeed = false;
     public int seed = 12345;
+    public int sessionDurationSeconds = 120;
     public string resultSceneName = "Finish";
     public bool disableOldCameraOnResult = true;
     public float resultSceneFadeTime = 0.5f;
@@ -23,9 +24,8 @@ public class MazeProjectMaster : MonoBehaviour
     public Material wallMaterial;
     public Material floorMaterial;
     public Material playerMaterial;
-    public Vector2 timerAnchorMin = new Vector2(0.1f, 0.95f);
-    public Vector2 timerAnchorMax = new Vector2(0.9f, 1f);
-    public int sessionDurationSeconds = 300;
+    public Vector2 timerAnchorMin = new Vector2(0.82f, 0.98f);
+    public Vector2 timerAnchorMax = new Vector2(0.98f, 1f);
     public bool animatePaths = true;
     public float pathAnimateDelay = 0.03f;
 
@@ -72,6 +72,7 @@ public class MazeProjectMaster : MonoBehaviour
 
         uiController.Setup(this, generator, playerController, timerAnchorMin, timerAnchorMax, pathAnimateDelay);
         uiController.SetTimerText(sessionDurationSeconds);
+        uiController.StartTutorialAnimation();
 
         sessionActive = true;
         isFinished = false;
@@ -111,17 +112,67 @@ public class MazeProjectMaster : MonoBehaviour
 
         float pctDFS = generator.ComputeLcsPercentage(playerController.userPath, generator.dfsPath);
         float pctBFS = generator.ComputeLcsPercentage(playerController.userPath, generator.bfsPath);
+        float pctDfsBfs = generator.ComputeLcsPercentage(generator.dfsPath, generator.bfsPath);
 
         float usedSec = sessionDurationSeconds - sessionTimeRemaining;
-        string score = $"{(reachedGoal ? "CLEAR!" : "TIME UP")}\nUser vs DFS: {pctDFS:F1}%\nUser vs BFS: {pctBFS:F1}%\nSteps: {playerController.userPath.Count}\nTime: {usedSec:F1}s";
-        StartCoroutine(TransitionToResultScene(score, reachedGoal, generator.bfsPath, generator.dfsPath));
+        string score = $"{(reachedGoal ? "CLEAR!" : "TIME UP")}\nUser vs DFS: {pctDFS:F1}%\nUser vs BFS: {pctBFS:F1}%\nDFS vs BFS: {pctDfsBfs:F1}%\nSteps: {playerController.userPath.Count}\nTime: {usedSec:F1}s";
+        StartCoroutine(TransitionToResultScene(score, reachedGoal, generator.bfsPath, generator.dfsPath, playerController.userPath));
     }
 
-    IEnumerator TransitionToResultScene(string scoreText, bool reachedGoal, List<Vector2Int> bfs, List<Vector2Int> dfs)
+    IEnumerator TransitionToResultScene(string scoreText, bool reachedGoal, List<Vector2Int> bfs, List<Vector2Int> dfs, List<Vector2Int> userPath)
     {
-        yield return new WaitForSeconds(resultSceneFadeTime);
+        // Create transition overlay with sweep animation
+        GameObject transitionGO = new GameObject("TransitionOverlay");
+        Canvas transitionCanvas = transitionGO.AddComponent<Canvas>();
+        transitionCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
+        transitionGO.AddComponent<CanvasScaler>();
+        transitionGO.AddComponent<GraphicRaycaster>();
         
-        // Disable game UI canvas immediately
+        GameObject panelGO = new GameObject("Panel");
+        panelGO.transform.parent = transitionGO.transform;
+        Image panelImage = panelGO.AddComponent<Image>();
+        panelImage.color = new Color(0, 0, 0, 1);
+        RectTransform panelRect = panelGO.GetComponent<RectTransform>();
+        panelRect.anchorMin = Vector2.zero;
+        panelRect.anchorMax = Vector2.one;
+        panelRect.offsetMin = Vector2.zero;
+        panelRect.offsetMax = Vector2.zero;
+        
+        CanvasGroup canvasGroup = panelGO.AddComponent<CanvasGroup>();
+        canvasGroup.alpha = 1;
+        
+        GameObject textGO = new GameObject("TransitionText");
+        textGO.transform.parent = panelGO.transform;
+        TMP_Text transitionText = textGO.AddComponent<TextMeshProUGUI>();
+        transitionText.text = "ANALYZING RESULTS...";
+        transitionText.fontSize = 60;
+        transitionText.alignment = TextAlignmentOptions.Center;
+        transitionText.color = Color.white;
+        RectTransform textRect = textGO.GetComponent<RectTransform>();
+        textRect.anchorMin = Vector2.zero;
+        textRect.anchorMax = Vector2.one;
+        textRect.offsetMin = Vector2.zero;
+        textRect.offsetMax = Vector2.zero;
+        
+        // Wait with analyzing message
+        yield return new WaitForSeconds(1.5f);
+        
+        // Sweep animation (slide left while fading out)
+        float sweepDuration = 1f;
+        float elapsedTime = 0f;
+        while (elapsedTime < sweepDuration)
+        {
+            elapsedTime += Time.deltaTime;
+            float t = elapsedTime / sweepDuration;
+            
+            // Slide to left
+            panelRect.anchoredPosition = Vector2.Lerp(Vector2.zero, new Vector2(-1920, 0), t);
+            canvasGroup.alpha = Mathf.Lerp(1, 0, t);
+            
+            yield return null;
+        }
+        
+        // Disable game UI canvas
         uiController.DestroyCanvas();
         yield return new WaitForEndOfFrame();
         
@@ -133,8 +184,8 @@ public class MazeProjectMaster : MonoBehaviour
         GameObject resultUIGO = new GameObject("ResultUIContainer");
         SceneManager.MoveGameObjectToScene(resultUIGO, resultScene);
         
-        // Make the UI controller create result scene UI
-        uiController.CreateResultSceneUI(scoreText, reachedGoal, bfs, dfs);
+        // Make the UI controller create result scene UI with user path
+        uiController.CreateResultSceneUI(scoreText, reachedGoal, bfs, dfs, userPath);
         
         // Move maze and camera to result scene
         if (visualizer != null && visualizer.MazeRoot != null)
@@ -145,6 +196,9 @@ public class MazeProjectMaster : MonoBehaviour
         {
             SceneManager.MoveGameObjectToScene(Camera.main.gameObject, resultScene);
         }
+        
+        // Destroy transition overlay
+        Destroy(transitionGO);
     }
 
     void CreateResultSceneUI(string scoreText, bool reachedGoal, List<Vector2Int> bfs, List<Vector2Int> dfs)

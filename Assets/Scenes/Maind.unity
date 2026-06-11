@@ -148,8 +148,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: fa85ac3339c80714585abacebce5c71b, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  cellsWidth: 10
-  cellsHeight: 10
+  cellsWidth: 100
+  cellsHeight: 100
   Start: {x: 0, y: 0}
   End: {x: 0, y: 0}
   wallPrefab: {fileID: 0}
@@ -184,6 +184,10 @@ GameObject:
   m_Component:
   - component: {fileID: 540823518}
   - component: {fileID: 540823517}
+  - component: {fileID: 540823522}
+  - component: {fileID: 540823521}
+  - component: {fileID: 540823520}
+  - component: {fileID: 540823519}
   m_Layer: 0
   m_Name: MazeProjectMaster
   m_TagString: Untagged
@@ -203,23 +207,21 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: ee53c0c3b962dfd489ddaabecd6cb639, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  width: 15
-  height: 15
+  width: 100
+  height: 100
   cellSize: 1
   useSeed: 0
   seed: 12345
-  useFixedStartEnd: 0
-  fixedStart: {x: 1, y: 1}
-  fixedEnd: {x: 13, y: 13}
-  useTMP: 1
-  sessionDurationSeconds: 300
-  resultSceneName: MazeResultScene
+  resultSceneName: Finish
   disableOldCameraOnResult: 1
   resultSceneFadeTime: 0.5
   enableShadows: 0
   wallMaterial: {fileID: 0}
   floorMaterial: {fileID: 0}
   playerMaterial: {fileID: 0}
+  timerAnchorMin: {x: 0.1, y: 0.95}
+  timerAnchorMax: {x: 0.9, y: 1}
+  sessionDurationSeconds: 300
   animatePaths: 1
   pathAnimateDelay: 0.03
 --- !u!4 &540823518
@@ -237,6 +239,71 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &540823519
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 540823516}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 628961fd416606e44b47818ca1621e05, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+--- !u!114 &540823520
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 540823516}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: fbd6ceaa8d52d6c4ea633094a23b6887, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  maze: {fileID: 0}
+  playerGO: {fileID: 0}
+  playerGrid: {x: 0, y: 0}
+  userPath: []
+  sessionActive: 0
+  isFinished: 0
+--- !u!114 &540823521
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 540823516}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 47941f1c355b96e4db46d6718da6b83f, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  wallMaterial: {fileID: 0}
+  floorMaterial: {fileID: 0}
+  enableShadows: 0
+--- !u!114 &540823522
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 540823516}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: eb34616532e24244ab418db3d5a2ed37, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  width: 45
+  height: 45
+  useSeed: 0
+  seed: 12345
+  startPos: {x: 1, y: 1}
+  endPos: {x: 43, y: 43}
+  bfsPath: []
+  dfsPath: []
 --- !u!1 &780978064
 GameObject:
   m_ObjectHideFlags: 0
@@ -578,7 +645,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!114 &1557647157
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -657,7 +724,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!114 &1812409285
 MonoBehaviour:
   m_ObjectHideFlags: 0

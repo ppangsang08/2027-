@@ -19,9 +19,17 @@ public class MazeUIController : MonoBehaviour
     MazePlayerController player;
     float cellSize;
     float pathAnimateDelay;
-    GameObject pathFollower;
+    GameObject pathLineGO;
     LineRenderer pathLine;
-    Coroutine playbackCoroutine;
+    GameObject userPathLineGO;
+    LineRenderer userPathLine;
+    GameObject overlayPathLineGO;
+    LineRenderer overlayPathLine;
+    Coroutine tutorialAnimationCoroutine;
+    CanvasGroup tutorialCanvasGroup;
+    List<Vector2Int> cachedBFSPath;
+    List<Vector2Int> cachedDFSPath;
+    List<Vector2Int> cachedUserPath;
 
     public void Setup(MazeProjectMaster master, MazeGenerator maze, MazePlayerController player, Vector2 timerAnchorMin, Vector2 timerAnchorMax, float pathAnimateDelay)
     {
@@ -59,17 +67,27 @@ public class MazeUIController : MonoBehaviour
         timerGO.transform.parent = canvas.transform;
         timerText = timerGO.AddComponent<TextMeshProUGUI>();
         timerText.fontSize = 24;
-        timerText.alignment = TextAlignmentOptions.Center;
+        timerText.alignment = TextAlignmentOptions.TopRight;
         timerText.color = Color.white;
         RectTransform trt = timerText.GetComponent<RectTransform>();
         trt.anchorMin = timerAnchorMin;
         trt.anchorMax = timerAnchorMax;
-        trt.offsetMin = Vector2.zero;
-        trt.offsetMax = Vector2.zero;
+        trt.offsetMin = new Vector2(0, -10);
+        trt.offsetMax = new Vector2(-10, 0);
         timerText.text = "TIME: 5:00";
 
+        // Create tutorial panel to hold all tutorial UI elements
+        GameObject tutorialPanel = new GameObject("TutorialPanel");
+        tutorialPanel.transform.parent = canvas.transform;
+        tutorialCanvasGroup = tutorialPanel.AddComponent<CanvasGroup>();
+        RectTransform tutorialRect = tutorialPanel.AddComponent<RectTransform>();
+        tutorialRect.anchorMin = Vector2.zero;
+        tutorialRect.anchorMax = Vector2.one;
+        tutorialRect.offsetMin = Vector2.zero;
+        tutorialRect.offsetMax = Vector2.zero;
+
         GameObject textGO = new GameObject("ResultText");
-        textGO.transform.parent = canvas.transform;
+        textGO.transform.parent = tutorialPanel.transform;
         resultText = textGO.AddComponent<TextMeshProUGUI>();
         resultText.fontSize = 24;
         resultText.alignment = TextAlignmentOptions.Center;
@@ -82,7 +100,7 @@ public class MazeUIController : MonoBehaviour
         resultText.text = "Move with WASD or arrow keys";
 
         GameObject modeGO = new GameObject("PathModeText");
-        modeGO.transform.parent = canvas.transform;
+        modeGO.transform.parent = tutorialPanel.transform;
         pathModeText = modeGO.AddComponent<TextMeshProUGUI>();
         pathModeText.fontSize = 20;
         pathModeText.alignment = TextAlignmentOptions.Center;
@@ -95,7 +113,7 @@ public class MazeUIController : MonoBehaviour
         pathModeText.text = "Press DFS or BFS to animate path";
 
         GameObject dfsPercGO = new GameObject("DFSPercentText");
-        dfsPercGO.transform.parent = canvas.transform;
+        dfsPercGO.transform.parent = tutorialPanel.transform;
         dfsPercentText = dfsPercGO.AddComponent<TextMeshProUGUI>();
         dfsPercentText.fontSize = 18;
         dfsPercentText.alignment = TextAlignmentOptions.Center;
@@ -108,7 +126,7 @@ public class MazeUIController : MonoBehaviour
         dfsPercentText.text = "DFS match: N/A";
 
         GameObject bfsPercGO = new GameObject("BFSPercentText");
-        bfsPercGO.transform.parent = canvas.transform;
+        bfsPercGO.transform.parent = tutorialPanel.transform;
         bfsPercentText = bfsPercGO.AddComponent<TextMeshProUGUI>();
         bfsPercentText.fontSize = 18;
         bfsPercentText.alignment = TextAlignmentOptions.Center;
@@ -165,6 +183,43 @@ public class MazeUIController : MonoBehaviour
             resultText.text = text;
     }
 
+    public void StartTutorialAnimation()
+    {
+        if (tutorialAnimationCoroutine != null)
+            StopCoroutine(tutorialAnimationCoroutine);
+        tutorialAnimationCoroutine = StartCoroutine(TutorialFadeOutAnimation());
+    }
+
+    IEnumerator TutorialFadeOutAnimation()
+    {
+        // Display tutorial for 2 seconds
+        yield return new WaitForSeconds(2f);
+
+        // Fade out animation: 1 second
+        float fadeDuration = 1f;
+        float elapsedTime = 0f;
+        Vector3 startScale = Vector3.one;
+        Vector3 endScale = new Vector3(1.1f, 1.1f, 1f);
+
+        while (elapsedTime < fadeDuration)
+        {
+            elapsedTime += Time.deltaTime;
+            float t = elapsedTime / fadeDuration;
+            
+            // Fade out alpha
+            tutorialCanvasGroup.alpha = Mathf.Lerp(1f, 0f, t);
+            
+            // Subtle scale up effect
+            tutorialCanvasGroup.GetComponent<RectTransform>().localScale = Vector3.Lerp(startScale, endScale, t);
+            
+            yield return null;
+        }
+
+        // Ensure final state
+        tutorialCanvasGroup.alpha = 0f;
+        tutorialCanvasGroup.GetComponent<RectTransform>().localScale = endScale;
+    }
+
     public void UpdatePercentText(float dfsPct, float bfsPct)
     {
         if (dfsPercentText != null)
@@ -187,13 +242,22 @@ public class MazeUIController : MonoBehaviour
         bfsPercentText = null;
     }
 
-    public void CreateResultSceneUI(string scoreText, bool reachedGoal, List<Vector2Int> bfs, List<Vector2Int> dfs)
+    public void CreateResultSceneUI(string scoreText, bool reachedGoal, List<Vector2Int> bfs, List<Vector2Int> dfs, List<Vector2Int> userPath)
     {
-        GameObject resultRoot = new GameObject("ResultRoot");
-        resultRoot.transform.parent = transform;
+        // Cache the paths for button callbacks
+        cachedBFSPath = bfs;
+        cachedDFSPath = dfs;
+        cachedUserPath = userPath;
+
+        // Create EventSystem if needed
+        if (FindObjectOfType<EventSystem>() == null)
+        {
+            GameObject eventSystem = new GameObject("EventSystem");
+            eventSystem.AddComponent<EventSystem>();
+            eventSystem.AddComponent<StandaloneInputModule>();
+        }
 
         GameObject cgo = new GameObject("ResultCanvas");
-        cgo.transform.parent = resultRoot.transform;
         var resultCanvas = cgo.AddComponent<Canvas>();
         resultCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
         cgo.AddComponent<CanvasScaler>();
@@ -242,60 +306,108 @@ public class MazeUIController : MonoBehaviour
 
         CreateButton(cgo.transform, "DFSButton", "DFS", new Vector2(0.1f, 0.05f), new Vector2(0.4f, 0.15f), OnShowDFSPath);
         CreateButton(cgo.transform, "BFSButton", "BFS", new Vector2(0.6f, 0.05f), new Vector2(0.9f, 0.15f), OnShowBFSPath);
+
+        // Auto-display user path
+        if (cachedUserPath != null && cachedUserPath.Count > 0)
+        {
+            StartCoroutine(AutoDisplayUserPath());
+        }
+    }
+
+    IEnumerator AutoDisplayUserPath()
+    {
+        yield return new WaitForEndOfFrame();
+        if (cachedUserPath != null && cachedUserPath.Count > 0)
+        {
+            StartUserPathPlayback(cachedUserPath, new Color(0.2f, 1f, 0.2f), 0.01f);
+        }
     }
 
     public void OnShowDFSPath()
     {
-        StartPathPlayback(maze.dfsPath, Color.cyan);
+        StartOverlayPathPlayback(cachedDFSPath, Color.cyan, 0.02f);
     }
 
     public void OnShowBFSPath()
     {
-        StartPathPlayback(maze.bfsPath, Color.yellow);
+        StartOverlayPathPlayback(cachedBFSPath, Color.yellow, 0.02f);
     }
 
-    void StartPathPlayback(List<Vector2Int> path, Color color)
+    void StartUserPathPlayback(List<Vector2Int> path, Color color, float delay = -1)
+    {
+        if (path == null || path.Count == 0) return;
+        if (userPathLine != null) Destroy(userPathLine.gameObject);
+        if (userPathFollower != null) Destroy(userPathFollower);
+        float animDelay = delay >= 0 ? delay : pathAnimateDelay;
+        StartCoroutine(AnimatePath(path, color, animDelay, true));
+    }
+
+    void StartOverlayPathPlayback(List<Vector2Int> path, Color color, float delay = -1)
     {
         if (path == null || path.Count == 0) return;
         if (playbackCoroutine != null)
             StopCoroutine(playbackCoroutine);
-        ClearPlayback();
-        playbackCoroutine = StartCoroutine(AnimatePath(path, color));
+        if (pathLine != null) Destroy(pathLine.gameObject);
+        if (pathFollower != null) Destroy(pathFollower);
+        float animDelay = delay >= 0 ? delay : pathAnimateDelay;
+        playbackCoroutine = StartCoroutine(AnimatePath(path, color, animDelay, false));
     }
 
-    IEnumerator AnimatePath(List<Vector2Int> path, Color color)
+    IEnumerator AnimatePath(List<Vector2Int> path, Color color, float delayPerStep, bool isUserPath)
     {
-        pathLine = new GameObject("PathLine").AddComponent<LineRenderer>();
-        pathLine.material = new Material(Shader.Find("Sprites/Default"));
-        pathLine.widthMultiplier = cellSize * 0.12f;
-        pathLine.positionCount = path.Count;
-        pathLine.startColor = color;
-        pathLine.endColor = color;
+        LineRenderer targetLine;
+        if (isUserPath)
+        {
+            if (userPathLine != null) Destroy(userPathLine.gameObject);
+            if (userPathFollower != null) Destroy(userPathFollower);
+            userPathLine = new GameObject("UserPathLine").AddComponent<LineRenderer>();
+            targetLine = userPathLine;
+        }
+        else
+        {
+            if (pathLine != null) Destroy(pathLine.gameObject);
+            if (pathFollower != null) Destroy(pathFollower);
+            pathLine = new GameObject("PathLine").AddComponent<LineRenderer>();
+            targetLine = pathLine;
+        }
+
+        targetLine.useWorldSpace = true;
+        targetLine.material = new Material(Shader.Find("Sprites/Default"));
+        targetLine.widthMultiplier = cellSize * 0.08f;
+        targetLine.positionCount = path.Count;
+        targetLine.startColor = color;
+        targetLine.endColor = color;
+        targetLine.numCapVertices = 4;
+        targetLine.numCornerVertices = 4;
+        targetLine.alignment = LineAlignment.View;
 
         for (int i = 0; i < path.Count; i++)
         {
-            pathLine.SetPosition(i, GridToWorld(path[i]) + Vector3.up * (0.1f * cellSize));
+            targetLine.SetPosition(i, GridToWorld(path[i]) + Vector3.up * (0.1f * cellSize));
         }
 
-        pathFollower = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-        pathFollower.name = "PathFollower";
-        pathFollower.transform.localScale = Vector3.one * (cellSize * 0.4f);
-        var mr = pathFollower.GetComponent<MeshRenderer>();
+        GameObject follower = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        follower.name = isUserPath ? "UserPathFollower" : "PathFollower";
+        follower.transform.localScale = Vector3.one * (cellSize * 0.2f);
+        var mr = follower.GetComponent<MeshRenderer>();
         if (mr != null)
         {
             mr.material = new Material(Shader.Find("Standard"));
             mr.material.color = color;
         }
-        var col = pathFollower.GetComponent<Collider>();
+        var col = follower.GetComponent<Collider>();
         if (col != null) Destroy(col);
+
+        if (isUserPath)
+            userPathFollower = follower;
+        else
+            pathFollower = follower;
 
         for (int i = 0; i < path.Count; i++)
         {
-            pathFollower.transform.position = GridToWorld(path[i]) + Vector3.up * (0.5f * cellSize);
-            yield return new WaitForSeconds(pathAnimateDelay);
+            follower.transform.position = GridToWorld(path[i]) + Vector3.up * (0.5f * cellSize);
+            yield return new WaitForSeconds(delayPerStep);
         }
-
-        ClearPlayback();
     }
 
     Vector3 GridToWorld(Vector2Int position)
@@ -303,13 +415,19 @@ public class MazeUIController : MonoBehaviour
         return new Vector3(position.x * cellSize, 0f, position.y * cellSize);
     }
 
-    void ClearPlayback()
+    void ClearOverlayPlayback()
     {
-        if (pathFollower != null)
-            Destroy(pathFollower);
-        if (pathLine != null)
-            Destroy(pathLine.gameObject);
+        if (pathFollower != null) Destroy(pathFollower);
+        if (pathLine != null) Destroy(pathLine.gameObject);
         pathFollower = null;
         pathLine = null;
+    }
+
+    void ClearUserPlayback()
+    {
+        if (userPathFollower != null) Destroy(userPathFollower);
+        if (userPathLine != null) Destroy(userPathLine.gameObject);
+        userPathFollower = null;
+        userPathLine = null;
     }
 }

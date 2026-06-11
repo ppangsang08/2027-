@@ -71,14 +71,37 @@ public class MazeGenerator : MonoBehaviour
             }
         }
 
-        startPos = new Vector2Int(1, 1);
-        endPos = new Vector2Int(gw - 2, gh - 2);
+        // Fixed start position: bottom-left
+        startPos = new Vector2Int(1, gh - 2);
+        // Fixed end position: top-right
+        endPos = new Vector2Int(gw - 2, 1);
         isPath[startPos.x, startPos.y] = true;
         isPath[endPos.x, endPos.y] = true;
+        CarveConnectionToEnd(startPos, gw, gh);
         CarveConnectionToEnd(endPos, gw, gh);
+        AddRandomLoops(gw, gh, rng, Mathf.Max(30, (gw + gh) / 5));
 
         bfsPath = GetBFSPath(startPos, endPos);
         dfsPath = GetDFSPath(startPos, endPos);
+        int retries = 0;
+        while (PathsAreEqual(bfsPath, dfsPath) && retries < 5)
+        {
+            AddRandomLoops(gw, gh, rng, Mathf.Max(20, (gw + gh) / 6));
+            bfsPath = GetBFSPath(startPos, endPos);
+            dfsPath = GetDFSPath(startPos, endPos);
+            retries++;
+        }
+    }
+
+    bool PathsAreEqual(List<Vector2Int> path1, List<Vector2Int> path2)
+    {
+        if (path1 == null || path2 == null) return false;
+        if (path1.Count != path2.Count) return false;
+        for (int i = 0; i < path1.Count; i++)
+        {
+            if (path1[i] != path2[i]) return false;
+        }
+        return true;
     }
 
     bool IsWithinGrid(Vector2Int g, int gw, int gh)
@@ -121,6 +144,34 @@ public class MazeGenerator : MonoBehaviour
         }
     }
 
+    void AddRandomLoops(int gw, int gh, System.Random rng, int loopCount)
+    {
+        List<Vector2Int> candidates = new List<Vector2Int>();
+        for (int x = 1; x < gw - 1; x++)
+        {
+            for (int y = 1; y < gh - 1; y++)
+            {
+                if (isPath[x, y]) continue;
+                bool left = isPath[x - 1, y];
+                bool right = isPath[x + 1, y];
+                bool up = isPath[x, y + 1];
+                bool down = isPath[x, y - 1];
+                if ((left && right && !up && !down) || (up && down && !left && !right))
+                {
+                    candidates.Add(new Vector2Int(x, y));
+                }
+            }
+        }
+
+        for (int i = 0; i < loopCount && candidates.Count > 0; i++)
+        {
+            int index = rng.Next(candidates.Count);
+            Vector2Int choice = candidates[index];
+            isPath[choice.x, choice.y] = true;
+            candidates.RemoveAt(index);
+        }
+    }
+
     public bool IsWalkable(Vector2Int g)
     {
         if (g.x < 0 || g.x >= width || g.y < 0 || g.y >= height) return false;
@@ -136,6 +187,7 @@ public class MazeGenerator : MonoBehaviour
         q.Enqueue(start);
         visited[start.x, start.y] = true;
 
+        // BFS explores right, left, up, down
         Vector2Int[] moves = new Vector2Int[]
         {
             new Vector2Int(1, 0),
@@ -184,10 +236,11 @@ public class MazeGenerator : MonoBehaviour
         bool found = false;
         System.Action<Vector2Int> dfs = null;
 
+        // DFS explores in completely opposite direction: up, down, right, left
         Vector2Int[] moves = new Vector2Int[]
         {
-            new Vector2Int(0, -1),
             new Vector2Int(0, 1),
+            new Vector2Int(0, -1),
             new Vector2Int(-1, 0),
             new Vector2Int(1, 0)
         };
