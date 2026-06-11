@@ -184,6 +184,9 @@ public class MazeProjectMaster : MonoBehaviour
         GameObject resultUIGO = new GameObject("ResultUIContainer");
         SceneManager.MoveGameObjectToScene(resultUIGO, resultScene);
         
+        // Move UIController to result scene BEFORE calling CreateResultSceneUI
+        SceneManager.MoveGameObjectToScene(uiController.gameObject, resultScene);
+        
         // Make the UI controller create result scene UI with user path
         uiController.CreateResultSceneUI(scoreText, reachedGoal, bfs, dfs, userPath);
         

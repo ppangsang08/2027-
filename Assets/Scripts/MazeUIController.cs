@@ -30,6 +30,9 @@ public class MazeUIController : MonoBehaviour
     List<Vector2Int> cachedBFSPath;
     List<Vector2Int> cachedDFSPath;
     List<Vector2Int> cachedUserPath;
+    GameObject pathFollower;
+    GameObject userPathFollower;
+    Coroutine playbackCoroutine;
 
     public void Setup(MazeProjectMaster master, MazeGenerator maze, MazePlayerController player, Vector2 timerAnchorMin, Vector2 timerAnchorMax, float pathAnimateDelay)
     {
@@ -249,6 +252,8 @@ public class MazeUIController : MonoBehaviour
         cachedDFSPath = dfs;
         cachedUserPath = userPath;
 
+        Debug.Log($"CreateResultSceneUI called - BFS: {(bfs != null ? bfs.Count : 0)}, DFS: {(dfs != null ? dfs.Count : 0)}, User: {(userPath != null ? userPath.Count : 0)}");
+
         // Create EventSystem if needed
         if (FindObjectOfType<EventSystem>() == null)
         {
@@ -310,104 +315,174 @@ public class MazeUIController : MonoBehaviour
         // Auto-display user path
         if (cachedUserPath != null && cachedUserPath.Count > 0)
         {
+            Debug.Log($"Starting to display user path with {cachedUserPath.Count} points");
             StartCoroutine(AutoDisplayUserPath());
         }
     }
 
     IEnumerator AutoDisplayUserPath()
     {
+        Debug.Log("AutoDisplayUserPath - Waiting for end of frame");
         yield return new WaitForEndOfFrame();
+        Debug.Log($"AutoDisplayUserPath - After WaitForEndOfFrame, cachedUserPath: {(cachedUserPath != null ? cachedUserPath.Count : 0)}");
         if (cachedUserPath != null && cachedUserPath.Count > 0)
         {
-            StartUserPathPlayback(cachedUserPath, new Color(0.2f, 1f, 0.2f), 0.01f);
+            Debug.Log("AutoDisplayUserPath - Calling StartUserPathPlayback");
+            // Slow animation to see path being drawn
+            StartUserPathPlayback(cachedUserPath, new Color(0f, 1f, 0f, 1f), 0.01f);
+        }
+        else
+        {
+            Debug.Log("AutoDisplayUserPath - cachedUserPath is null or empty");
         }
     }
 
     public void OnShowDFSPath()
     {
-        StartOverlayPathPlayback(cachedDFSPath, Color.cyan, 0.02f);
+        Debug.Log("OnShowDFSPath called");
+        ClearOverlayPlayback();
+        if (cachedDFSPath != null && cachedDFSPath.Count > 0)
+        {
+            Debug.Log($"Starting DFS playback with {cachedDFSPath.Count} points");
+            StartOverlayPathPlayback(cachedDFSPath, Color.cyan, 0.005f);
+        }
+        else
+        {
+            Debug.LogWarning("cachedDFSPath is null or empty");
+        }
     }
 
     public void OnShowBFSPath()
     {
-        StartOverlayPathPlayback(cachedBFSPath, Color.yellow, 0.02f);
+        Debug.Log("OnShowBFSPath called");
+        ClearOverlayPlayback();
+        if (cachedBFSPath != null && cachedBFSPath.Count > 0)
+        {
+            Debug.Log($"Starting BFS playback with {cachedBFSPath.Count} points");
+            StartOverlayPathPlayback(cachedBFSPath, Color.red, 0.005f);
+        }
+        else
+        {
+            Debug.LogWarning("cachedBFSPath is null or empty");
+        }
     }
 
     void StartUserPathPlayback(List<Vector2Int> path, Color color, float delay = -1)
     {
         if (path == null || path.Count == 0) return;
-        if (userPathLine != null) Destroy(userPathLine.gameObject);
-        if (userPathFollower != null) Destroy(userPathFollower);
+        ClearUserPlayback();
+        Debug.Log($"StartUserPathPlayback - Drawing {path.Count} path points with color {color}");
         float animDelay = delay >= 0 ? delay : pathAnimateDelay;
-        StartCoroutine(AnimatePath(path, color, animDelay, true));
+        // Use bright lime green for user path
+        StartCoroutine(AnimatePath(path, new Color(0f, 1f, 0f, 1f), animDelay, true));
     }
 
     void StartOverlayPathPlayback(List<Vector2Int> path, Color color, float delay = -1)
     {
         if (path == null || path.Count == 0) return;
+        Debug.Log($"StartOverlayPathPlayback - Drawing {path.Count} path points with color {color}");
         if (playbackCoroutine != null)
+        {
             StopCoroutine(playbackCoroutine);
-        if (pathLine != null) Destroy(pathLine.gameObject);
-        if (pathFollower != null) Destroy(pathFollower);
+            playbackCoroutine = null;
+        }
         float animDelay = delay >= 0 ? delay : pathAnimateDelay;
         playbackCoroutine = StartCoroutine(AnimatePath(path, color, animDelay, false));
     }
 
     IEnumerator AnimatePath(List<Vector2Int> path, Color color, float delayPerStep, bool isUserPath)
     {
-        LineRenderer targetLine;
+        if (path == null || path.Count == 0)
+        {
+            Debug.LogWarning("AnimatePath called with empty path");
+            yield break;
+        }
+        
+        Debug.Log($"AnimatePath started - isUserPath: {isUserPath}, path count: {path.Count}, color: {color}");
+        
+        // Create parent container
+        GameObject parentGO;
+        LineRenderer lineRenderer;
+        
         if (isUserPath)
         {
             if (userPathLine != null) Destroy(userPathLine.gameObject);
             if (userPathFollower != null) Destroy(userPathFollower);
-            userPathLine = new GameObject("UserPathLine").AddComponent<LineRenderer>();
-            targetLine = userPathLine;
+            parentGO = new GameObject("UserPath_Display");
+            lineRenderer = parentGO.AddComponent<LineRenderer>();
+            userPathLine = lineRenderer;
         }
         else
         {
             if (pathLine != null) Destroy(pathLine.gameObject);
             if (pathFollower != null) Destroy(pathFollower);
-            pathLine = new GameObject("PathLine").AddComponent<LineRenderer>();
-            targetLine = pathLine;
+            parentGO = new GameObject("OverlayPath_Display");
+            lineRenderer = parentGO.AddComponent<LineRenderer>();
+            pathLine = lineRenderer;
         }
 
-        targetLine.useWorldSpace = true;
-        targetLine.material = new Material(Shader.Find("Sprites/Default"));
-        targetLine.widthMultiplier = cellSize * 0.08f;
-        targetLine.positionCount = path.Count;
-        targetLine.startColor = color;
-        targetLine.endColor = color;
-        targetLine.numCapVertices = 4;
-        targetLine.numCornerVertices = 4;
-        targetLine.alignment = LineAlignment.View;
+        // Setup LineRenderer for drawing the entire path
+        Material lineMat = new Material(Shader.Find("Standard"));
+        lineMat.color = color;
+        lineMat.SetFloat("_Glossiness", 0f);
+        lineMat.SetVector("_EmissionColor", color * 2f);
+        lineMat.EnableKeyword("_EMISSION");
+        
+        lineRenderer.material = lineMat;
+        lineRenderer.useWorldSpace = true;
+        lineRenderer.startColor = color;
+        lineRenderer.endColor = color;
+        lineRenderer.widthMultiplier = cellSize * 0.5f;  // Very thick line
+        lineRenderer.numCapVertices = 20;
+        lineRenderer.numCornerVertices = 20;
+        lineRenderer.alignment = LineAlignment.View;
+        lineRenderer.positionCount = 0;
 
-        for (int i = 0; i < path.Count; i++)
-        {
-            targetLine.SetPosition(i, GridToWorld(path[i]) + Vector3.up * (0.1f * cellSize));
-        }
-
+        // Create bright follower sphere
         GameObject follower = GameObject.CreatePrimitive(PrimitiveType.Sphere);
         follower.name = isUserPath ? "UserPathFollower" : "PathFollower";
-        follower.transform.localScale = Vector3.one * (cellSize * 0.2f);
-        var mr = follower.GetComponent<MeshRenderer>();
-        if (mr != null)
+        follower.transform.parent = parentGO.transform;
+        follower.transform.localScale = Vector3.one * (cellSize * 0.8f);
+        
+        // Remove collider
+        Collider followerCol = follower.GetComponent<Collider>();
+        if (followerCol != null) DestroyImmediate(followerCol);
+        
+        // Set ultra-bright emissive color
+        MeshRenderer followerMr = follower.GetComponent<MeshRenderer>();
+        if (followerMr != null)
         {
-            mr.material = new Material(Shader.Find("Standard"));
-            mr.material.color = color;
+            Material sphereMat = new Material(Shader.Find("Standard"));
+            sphereMat.color = color;
+            sphereMat.SetFloat("_Glossiness", 0f);
+            sphereMat.SetFloat("_Metallic", 1f);
+            sphereMat.SetVector("_EmissionColor", color * 3f);
+            sphereMat.EnableKeyword("_EMISSION");
+            followerMr.material = sphereMat;
+            followerMr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
         }
-        var col = follower.GetComponent<Collider>();
-        if (col != null) Destroy(col);
 
         if (isUserPath)
             userPathFollower = follower;
         else
             pathFollower = follower;
 
+        // Animate: Draw line as follower moves
         for (int i = 0; i < path.Count; i++)
         {
-            follower.transform.position = GridToWorld(path[i]) + Vector3.up * (0.5f * cellSize);
+            // Add new point to line
+            lineRenderer.positionCount = i + 1;
+            Vector3 worldPos = GridToWorld(path[i]);
+            worldPos.y = 0.5f;
+            lineRenderer.SetPosition(i, worldPos);
+            
+            // Move follower to current position
+            follower.transform.position = worldPos;
+            
             yield return new WaitForSeconds(delayPerStep);
         }
+        
+        Debug.Log($"AnimatePath - Animation completed with {path.Count} line points");
     }
 
     Vector3 GridToWorld(Vector2Int position)
@@ -417,10 +492,13 @@ public class MazeUIController : MonoBehaviour
 
     void ClearOverlayPlayback()
     {
+        if (playbackCoroutine != null)
+            StopCoroutine(playbackCoroutine);
         if (pathFollower != null) Destroy(pathFollower);
         if (pathLine != null) Destroy(pathLine.gameObject);
         pathFollower = null;
         pathLine = null;
+        playbackCoroutine = null;
     }
 
     void ClearUserPlayback()
